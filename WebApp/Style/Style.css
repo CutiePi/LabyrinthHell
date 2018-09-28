@@ -1,0 +1,31 @@
+.tab {
+    width: 1280px;
+    color: white;
+    font-size: 22px;
+}
+
+body {
+    font-family: horroroid;
+    color: white;
+}
+
+@font-face {
+    font-family: horroroid;
+    src: url(horroroidbold.ttf);
+}
+
+.sLeft {
+    text-align: left;
+}
+
+.sRight {
+    text-align: right;
+}
+
+.sCenter {
+    text-align: center;
+}
+
+body {
+    color: white;
+}
