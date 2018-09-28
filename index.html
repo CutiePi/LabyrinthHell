@@ -1,368 +1,514 @@
+<html>
+<head>
+    <title>Projet 02 (Thesaurus) par Samuel Yvon, Gabriel Roy et Jasmin Lapointe</title>
+    <script type="text/javascript" src="Config/Config.js"></script>
+    <script type="text/javascript" src="Classes/Mur.js"></script>
+    <script type="text/javascript" src="Classes/Plancher.js"></script>
+    <script type="text/javascript" src="Classes/Plafond.js"></script>
+    <script type="text/javascript" src="Classes/Pointeur.js"></script>
+    <script type="text/javascript" src="Classes/Porte.js"></script>
+    <script type="text/javascript" src="Classes/Session.js"></script>
+    <script type="text/javascript" src="Classes/Teleporteur.js"></script>
+    <script type="text/javascript" src="Classes/Telerecepteur.js"></script>
+    <script type="text/javascript" src="Classes/Tresor.js"></script>
+    <script type="text/javascript" src="Classes/Personnage.js"></script>
+    <script type="text/javascript" src="Classes/Bousolle.js"></script>
+    <script type="text/javascript" src="Classes/HomeAABB.js"></script>
+    <script type="text/javascript" src="Classes/Pentagrame.js"></script>
+    <script type="text/javascript" src="Classes/Bot.js"></script>
+    <script type="text/javascript" src="Classes/Oeil.js"></script>
+    <script type="text/javascript" src="Utils/Camera.js"></script>
+    <script type="text/javascript" src="Utils/Son.js"></script>
+    <script type="text/javascript" src="Utils/Hitbox.js"></script>
+    <script type="text/javascript" src="Utils/glMatrix-0.9.5.min.js"></script>
+    <script type="text/javascript" src="Utils/ShaderCouleursTextures.js"></script>
+    <script type="text/javascript" src="Utils/Transformations.js"></script>
+    <script type="text/javascript" src="Utils/librairie.js"></script>
+    <script type="text/javascript" src="Utils/Textures.js"></script>
+    <script type="text/javascript" src="Utils/WebGL.js"></script>
+    <script type="text/javascript" src="Utils/SortedHitboxMap.js"></script>
+
+    <link rel="stylesheet" href="WebApp/Style/Style.css"/>
+    <link rel="icon" href="WebApp/Images/favicon.ico"/>
+
+    <script>
+        var objgl = null;
+        var objProgShaders = null;
+        var objScene3D = null;
+        var objCycleAnimation = null;
+        var tresor = null;
+        var session = null;
+        var personnage = null;
+        var tabMurs = null;
+        var tabTelep = null;
+        var tabTeler = null;
+        var bousolle = null;
+        var plafond = null;
+        var porte = null;
+        var homeAABB = null;
+        var touchesPesees = [];
+        var pointerLock = false;
+        var sortedHBMap = null;
+        var sortedArrowMap = null;
+        var bot = null;
+        var son = null;
+        var pentagrame  = null;
+
+        function initJeu() {
+            var objCanvas = document.getElementById('canvasJeu');
+
+            objCanvas.requestPointerLock = objCanvas.requestPointerLock ||
+                    objCanvas.mozRequestPointerLock ||
+                    objCanvas.webkitRequestPointerLock;
+
+            document.addEventListener('pointerlockchange', pointerLockListener, false);
+
+            objCanvas.oncontextmenu = function () {
+                return false;
+            }
+            son = new Son();
+            son.soundtrack();
+            tabTelep = [];
+            tabTeler = [];
+            objgl = initWebGL(objCanvas);
+            session = new Session(objgl);
+            session.generateComplementaryObjects();
+            demarrer();
+        }
+
+        function pointerLockListener() {
+            var objCanvas = document.getElementById('canvasJeu');
+            if (document.pointerLockElement === objCanvas ||
+                    document.mozPointerLockElement === objCanvas || document.webkitRequestPointerLock === objCanvas) {
+                pointerLock = true;
+            } else {
+                pointerLock = false;
+                objCanvas.removeEventListener("mousemove", mouseListener, false);
+            }
+        }
+
+
+        function demarrer() {
+            objProgShaders = initShaders(session.objgl);
+            objScene3D = initScene3D(session.objgl);
+            effacerCanevas(session.objgl);
+            dessiner(session.objgl, objProgShaders, objScene3D);
+            animer()
+        }
+
+        function animer() {
+            if (session.isGameRunning) {
+                objCycleAnimation = requestAnimationFrame(animer);
+                effacerCanevas(session.objgl);
+                mettreAJourAnimation();
+                dessiner(session.objgl, objProgShaders, objScene3D);
+            }
+        }
+
+        function mettreAJourAnimation() {
+
+            if (session.isGameRunning) {
+                for (var i = touchesPesees.length - 1; i >= 0; i--) {
+                    if (touchesPesees[i]) {
+                        personnage.move(i);
+                    }
+                }
+
+                if (null != session) {
+                    session.update();
+                }
+
+                if (null != porte && !porte.closed) {
+                    var inMainZone = personnage.hitbox.checkCollision(homeAABB.hitbox)
+                    if (!inMainZone || porte.closing) {
+                        porte.close()
+                    }
+                }
+                //'Hover effect' du tresor
+                if (null != tresor) {
+                    tresor.update()
+                }
+                //spin pentagrame 
+                if(null != pentagrame){
+                    pentagrame.update();
+                }
+
+                if(null != plafond) {
+                    plafond.update();
+                }
+
+                if(null != bot) {
+                    bot.update();
+                }
+                
+                if(null != personnage) {
+                    personnage.update();
+                }
+            }
+
+        }
+
+        function arreterAnimation() {
+            if (objCycleAnimation != null)
+                cancelAnimationFrame(objCycleAnimation);
+            objCycleAnimation = null;
+        }
+
+        function initScene3D(objgl) {
+
+            tabMurs = new Array();
+            var objScene3D = new Object();
+            var tabObjets3D = new Array();
+
+            objScene3D.textures = creerTextures(objgl);
+
+            personnage = new Personnage();
+            objScene3D.camera = personnage.camera;
+
+            if(Config.DEBUG.ALLOW_BOT) {
+                bot = new Bot(objgl);
+                tabObjets3D.push(bot);
+            }
+
+            plafond = new Plafond(objgl);
+            tabObjets3D.push(plafond);
+
+            porte = new Porte(session.objgl);
+            tabObjets3D.push(porte)
+
+            bousolle = new Bousolle(objgl);
+            tabObjets3D.push(bousolle);
+
+            setAngleY(personnage.getLookingAngle(), bousolle.transformations);
+            
+            var intCounter = 0;
+            var tiles = Config.MAP.TILES;
+            for (var u = 0; u < 31; u++) {
+                for (var i = 0; i < 27; i++) {
+                    if (tiles[intCounter] == 1 || tiles[intCounter] == 2) {
+                        var mur = null
+                        if(tiles[intCounter] == 2) {
+                                if(u==0)
+                                {
+                                mur = new Mur(objgl, [i * Config.WALL.WALL_DEPTH + 0.5 * Config.WALL.WALL_DEPTH, 0, u * Config.WALL.WALL_DEPTH + Config.WALL.WALL_DEPTH * 0.5],false,1);
+                                } 
+                                 else if(u==30)
+                                {
+                                mur = new Mur(objgl, [i * Config.WALL.WALL_DEPTH + 0.5 * Config.WALL.WALL_DEPTH, 0, u * Config.WALL.WALL_DEPTH + Config.WALL.WALL_DEPTH * 0.5],false,3);
+                                } 
+                                 else if(i==0)
+                                {
+                                mur = new Mur(objgl, [i * Config.WALL.WALL_DEPTH + 0.5 * Config.WALL.WALL_DEPTH, 0, u * Config.WALL.WALL_DEPTH + Config.WALL.WALL_DEPTH * 0.5],false,4);
+                                }  
+                                  else if(i==26)
+                                {
+                                mur = new Mur(objgl, [i * Config.WALL.WALL_DEPTH + 0.5 * Config.WALL.WALL_DEPTH, 0, u * Config.WALL.WALL_DEPTH + Config.WALL.WALL_DEPTH * 0.5],false,2);
+                                }      
+                                else 
+                                 {
+                                mur = new Mur(objgl, [i * Config.WALL.WALL_DEPTH + 0.5 * Config.WALL.WALL_DEPTH, 0, u * Config.WALL.WALL_DEPTH + Config.WALL.WALL_DEPTH * 0.5],false,5);
+                                }
+                        } else {
+                            mur = new Mur(objgl, [i * Config.WALL.WALL_DEPTH + 0.5 * Config.WALL.WALL_DEPTH, 0, u * Config.WALL.WALL_DEPTH + Config.WALL.WALL_DEPTH * 0.5],true,5);
+                        }
+                        tabMurs.push(mur)
+                        tabObjets3D.push(mur);
+                    }
+                    intCounter++;
+                }
+            }
+
+            var plancher = new Plancher(objgl,1,54,62,0,0,0,0);
+            tabObjets3D.push(plancher);
+            var plancher = new Plancher(objgl,1,6,8,0.01,26,24,1);
+            tabObjets3D.push(plancher);
+
+            homeAABB = new HomeAABB(objgl);
+
+
+            if (Config.DEBUG.SHOW_HITBOXES) {
+                for (var i = tabMurs.length - 1; i >= 0; i--) {
+                    tabObjets3D.push(tabMurs[i].hitbox)
+                }
+                tabObjets3D.push(personnage.hitbox);
+                tabObjets3D.push(porte.hitbox);
+                tabObjets3D.push(homeAABB.hitbox)
+            }
+
+            for (var i = session.complementaryObjects.length - 1; i >= 0; i--) {
+                tabObjets3D.push(session.complementaryObjects[i])
+            }
+
+            var hitboxes = [];
+
+            for (var i = tabMurs.length - 1; i >= 0; i--) {
+                hitboxes.push(tabMurs[i].hitbox)
+            }
+
+            sortedHBMap = new HitboxTree(Config.GAME.GAME_WIDTH,Config.GAME.GAME_DEPTH);
+            sortedHBMap.fill(hitboxes);
+
+            sortedArrowMap = new HitboxTree(Config.GAME.GAME_WIDTH,Config.GAME.GAME_DEPTH);
+
+            objScene3D.tabObjets3D = tabObjets3D;
+
+            return objScene3D;
+        }
+        /**
+         Il va falloir changer pour la version de la fonction dessiner qui
+         a le support pour les texels
+         */
+        function dessiner(objgl, objProgShaders, objScene3D) {
+            // La vue
+            objgl.viewport(0, 0, objgl.drawingBufferWidth, objgl.drawingBufferHeight);
+
+            // Matrice de projection (en perspective)
+            var matProjection = mat4.create();
+            var fltRapportCanevas = objgl.drawingBufferWidth / objgl.drawingBufferHeight;
+            mat4.perspective(45, fltRapportCanevas, 0.01, 100, matProjection);
+            // Relier la matrice aux shaders
+            objgl.uniformMatrix4fv(objProgShaders.matProjection, false, matProjection);
+
+            for (var i = 0; i < objScene3D.tabObjets3D.length; i++) {
+
+                var vertex = objScene3D.tabObjets3D[i].vertex;
+                var couleurs = objScene3D.tabObjets3D[i].couleurs;
+                var maillage = objScene3D.tabObjets3D[i].maillage;
+                var transformations = objScene3D.tabObjets3D[i].transformations;
+                var binVisible = objScene3D.tabObjets3D[i].binVisible;
+                var texels = objScene3D.tabObjets3D[i].texels;
+
+                var matModeleVue = mat4.create();
+                mat4.identity(matModeleVue);
+
+                if (session.birdView) {
+                    var newPosition = [getPositionX(objScene3D.camera), Config.CAMERA.BIRD_HEIGHT, getPositionZ(objScene3D.camera)];
+                    mat4.lookAt(newPosition,
+                            [getPositionX(objScene3D.camera), -1, getPositionZ(objScene3D.camera)],
+                            [0, 0, -1],
+                            matModeleVue);
+                } else {
+                    mat4.lookAt(getPositionsCameraXYZ(objScene3D.camera),
+                            getCiblesCameraXYZ(objScene3D.camera),
+                            getOrientationsXYZ(objScene3D.camera),
+                            matModeleVue);
+                }
+
+                mat4.translate(matModeleVue, getPositionsXYZ(transformations));
+                mat4.scale(matModeleVue, getEchellesXYZ(transformations));
+                mat4.rotateX(matModeleVue, getAngleX(transformations) * Math.PI / 180);
+                mat4.rotateY(matModeleVue, getAngleY(transformations) * Math.PI / 180);
+                mat4.rotateZ(matModeleVue, getAngleZ(transformations) * Math.PI / 180);
+                if ((typeof binVisible === 'undefined') || (binVisible == true)) {
+                    // Relier la matrice aux shaders
+                    objgl.uniformMatrix4fv(objProgShaders.matModeleVue, false, matModeleVue);
+
+                    if (maillage == null) {
+                        for (var j = 0; j < vertex.length; j++) {
+
+                            objgl.bindBuffer(objgl.ARRAY_BUFFER, vertex[j]);
+                            objgl.vertexAttribPointer(objProgShaders.posVertex, vertex[j].intTailleElem, objgl.FLOAT, false, 0, 0);
+
+                            // Relier les couleurs aux shaders
+                            objgl.bindBuffer(objgl.ARRAY_BUFFER, couleurs[j]);
+                            objgl.vertexAttribPointer(objProgShaders.couleurVertex, couleurs[j].intTailleElem, objgl.FLOAT, false, 0, 0);
+
+                            // Activer la texture
+                            if(null != texels && typeof texels !== 'undefined') {
+                                objgl.activeTexture(objgl.TEXTURE0 + texels[j].intNoTexture);
+                            objgl.bindTexture(objgl.TEXTURE_2D, objScene3D.textures[texels[j].intNoTexture]);
+
+                            // Relier les texels aux shaders
+                            objgl.bindBuffer(objgl.ARRAY_BUFFER, texels[j]);
+                            objgl.vertexAttribPointer(objProgShaders.posTexel, texels[j].intTailleElem, objgl.FLOAT, false, 0, 0);
+
+                            // Relier le no de texture et le taux de couleur aux shaders
+                            objgl.uniform1i(objProgShaders.noTexture, texels[j].intNoTexture);
+                            objgl.uniform1f(objProgShaders.pcCouleurTexel, texels[j].pcCouleurTexel);
+                            }
+
+                            // Dessiner
+                            objgl.drawArrays(vertex[j].typeDessin, 0, vertex[j].intNbElems);
+                        }
+                    }
+                    // Dessiner les sous-objets
+
+                    else { // Dessiner le maillage
+
+                        // Relier les vertex aux shaders
+                        objgl.bindBuffer(objgl.ARRAY_BUFFER, vertex);
+                        objgl.vertexAttribPointer(objProgShaders.posVertex, vertex.intTailleElem, objgl.FLOAT, false, 0, 0);
+
+                        // Relier les couleurs aux shaders
+                        objgl.bindBuffer(objgl.ARRAY_BUFFER, couleurs);
+                        objgl.vertexAttribPointer(objProgShaders.couleurVertex, couleurs.intTailleElem, objgl.FLOAT, false, 0, 0)
+
+                        // Activer la texture
+                        if(null != texels && typeof texels !== 'undefined') {
+                             objgl.activeTexture(objgl.TEXTURE0 + texels.intNoTexture);
+                        objgl.bindTexture(objgl.TEXTURE_2D, objScene3D.textures[texels.intNoTexture]);
+
+                        // Relier les texels aux shaders
+                        objgl.bindBuffer(objgl.ARRAY_BUFFER, texels);
+                        objgl.vertexAttribPointer(objProgShaders.posTexel, texels.intTailleElem, objgl.FLOAT, false, 0, 0);
+
+                        // Relier le no de texture et le taux de couleur aux shaders
+                        objgl.uniform1i(objProgShaders.noTexture, texels.intNoTexture);
+                        objgl.uniform1f(objProgShaders.pcCouleurTexel, texels.pcCouleurTexel);
+
+                        }
+                        // Sélectionner le maillage qu'on va utiliser pour les triangles et les droites
+                        objgl.bindBuffer(objgl.ELEMENT_ARRAY_BUFFER, maillage);
+
+                        // Dessiner les triangles
+                        objgl.drawElements(objgl.TRIANGLES, maillage.intNbElemsTriangles, objgl.UNSIGNED_SHORT, 0);
+                        // Dessiner les droites à la suite des triangles
+                        objgl.drawElements(objgl.LINES, maillage.intNbElemsDroites, objgl.UNSIGNED_SHORT, maillage.intNbElemsTriangles * 2);
+                    }
+                }
+
+            }
+        }
+        /**
+         Sam: Fini
+         */
+        function effacerCanevas(objgl) {
+            objgl.clearColor(0.0, 0.0, 0.0, 1.0);
+            objgl.clear(objgl.COLOR_BUFFER_BIT | objgl.DEPTH_BUFFER_BIT);
+        }
+        /**
+         Sam: Fini
+         */
+        function keyDown() {
+            if (event.keyCode != 116 && event.keyCode != 34 && event.keyCode != 33) {
+                touchesPesees[event.keyCode] = true
+                event.preventDefault()
+            } else if (event.keyCode == 33 || event.keyCode == 34) {
+                event.preventDefault()
+            }
+
+            //Vérifier si on veut tricher
+            if (touchesPesees[17] && touchesPesees[16] && touchesPesees[32]) {
+                session.toggleCheating();
+            }
+        }
+        /**
+         Sam: Fini
+         */
+        function keyup() {
+
+            if (event.keyCode != 116 && event.keyCode != 33 && event.keyCode != 34) {
+                touchesPesees[event.keyCode] = false;
+                event.preventDefault()
+            } else if (event.keyCode == 33) {
+                event.preventDefault();
+                session.toggleBirdView(true)
+            } else if (event.keyCode == 34) {
+                event.preventDefault();
+                session.toggleBirdView(false)
+            }
+
+            if (event.keyCode == 32 && !session.birdView) {
+                personnage.activateBomb()
+            }
+        }
+
+        function mousePressDown() {
+
+            if (!pointerLock) {
+                var objCanvas = document.getElementById('canvasJeu');
+                objCanvas.requestPointerLock();
+                objCanvas.addEventListener("mousemove", mouseListener, false);
+            } else {
+                if (event.which === 1) {
+                    touchesPesees[37] = true
+                } else if (event.which === 3) {
+                    touchesPesees[39] = true
+                }
+            }
+        }
+
+        function mousePressUp() {
+            if (event.which === 1) {
+                touchesPesees[37] = false
+            } else if (event.which === 3) {
+                touchesPesees[39] = false
+            } else if (event.which === 2) {
+                personnage.activateBomb()
+            }
+
+        }
+
+        function mouseWheel() {
+            if (event.deltaY < 0) {
+                personnage.move(38)
+            } else {
+                personnage.move(40)
+            }
+            event.preventDefault()
+        }
+
+        function mouseListener() {
+            if(Config.DEBUG.ENABLE_MOUSE_LATERAL_VIEW) {
+                if (event.movementX < 0) {
+                    personnage.move(37);
+                } else {
+                    personnage.move(39);
+                }
+            }
+        }
+
+    </script>
+</head>
+
+<body background="WebApp/Images/background1.jpg" onload="initJeu()">
+<center>
+    <section>
+        <h1>Bienvenue dans <b>LE LABYRINTHE DE SATAN</b></h1>
+    </section>
+    <canvas id="canvasJeu" autofocus="autofocus" height="720" width="1280" tabIndex="1" style="background:black;"
+            onkeyup=
+                    "keyup()" onkeydown="keyDown()" onmousedown="mousePressDown()" onmouseup="mousePressUp()"
+            onwheel="mouseWheel()">
+
+    </canvas>
+
+
+    <table class="tab">
+        <tr>
+            <td>
+                <h3>Niveau</h3>
+            </td>
+            <td id="tdLevel">
+
+            </td>
+
+            <td>
+                <h3>Temps restant</h3>
+            </td>
+            <td id="tdTimeLeft">
+
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <h3>Score</h3>
+            </td>
+            <td id="tdScore">
+
+            </td>
+
+            <td>
+                <h3>Bombes:</h3>
+            </td>
+
+            <td id="tdBombes">
+            </td>
+        </tr>
+    </table>
+
+
+</center>
+</body>
 
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml">
-  <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-    <title>Apache2 Debian Default Page: It works</title>
-    <style type="text/css" media="screen">
-  * {
-    margin: 0px 0px 0px 0px;
-    padding: 0px 0px 0px 0px;
-  }
-
-  body, html {
-    padding: 3px 3px 3px 3px;
-
-    background-color: #D8DBE2;
-
-    font-family: Verdana, sans-serif;
-    font-size: 11pt;
-    text-align: center;
-  }
-
-  div.main_page {
-    position: relative;
-    display: table;
-
-    width: 800px;
-
-    margin-bottom: 3px;
-    margin-left: auto;
-    margin-right: auto;
-    padding: 0px 0px 0px 0px;
-
-    border-width: 2px;
-    border-color: #212738;
-    border-style: solid;
-
-    background-color: #FFFFFF;
-
-    text-align: center;
-  }
-
-  div.page_header {
-    height: 99px;
-    width: 100%;
-
-    background-color: #F5F6F7;
-  }
-
-  div.page_header span {
-    margin: 15px 0px 0px 50px;
-
-    font-size: 180%;
-    font-weight: bold;
-  }
-
-  div.page_header img {
-    margin: 3px 0px 0px 40px;
-
-    border: 0px 0px 0px;
-  }
-
-  div.table_of_contents {
-    clear: left;
-
-    min-width: 200px;
-
-    margin: 3px 3px 3px 3px;
-
-    background-color: #FFFFFF;
-
-    text-align: left;
-  }
-
-  div.table_of_contents_item {
-    clear: left;
-
-    width: 100%;
-
-    margin: 4px 0px 0px 0px;
-
-    background-color: #FFFFFF;
-
-    color: #000000;
-    text-align: left;
-  }
-
-  div.table_of_contents_item a {
-    margin: 6px 0px 0px 6px;
-  }
-
-  div.content_section {
-    margin: 3px 3px 3px 3px;
-
-    background-color: #FFFFFF;
-
-    text-align: left;
-  }
-
-  div.content_section_text {
-    padding: 4px 8px 4px 8px;
-
-    color: #000000;
-    font-size: 100%;
-  }
-
-  div.content_section_text pre {
-    margin: 8px 0px 8px 0px;
-    padding: 8px 8px 8px 8px;
-
-    border-width: 1px;
-    border-style: dotted;
-    border-color: #000000;
-
-    background-color: #F5F6F7;
-
-    font-style: italic;
-  }
-
-  div.content_section_text p {
-    margin-bottom: 6px;
-  }
-
-  div.content_section_text ul, div.content_section_text li {
-    padding: 4px 8px 4px 16px;
-  }
-
-  div.section_header {
-    padding: 3px 6px 3px 6px;
-
-    background-color: #8E9CB2;
-
-    color: #FFFFFF;
-    font-weight: bold;
-    font-size: 112%;
-    text-align: center;
-  }
-
-  div.section_header_red {
-    background-color: #CD214F;
-  }
-
-  div.section_header_grey {
-    background-color: #9F9386;
-  }
-
-  .floating_element {
-    position: relative;
-    float: left;
-  }
-
-  div.table_of_contents_item a,
-  div.content_section_text a {
-    text-decoration: none;
-    font-weight: bold;
-  }
-
-  div.table_of_contents_item a:link,
-  div.table_of_contents_item a:visited,
-  div.table_of_contents_item a:active {
-    color: #000000;
-  }
-
-  div.table_of_contents_item a:hover {
-    background-color: #000000;
-
-    color: #FFFFFF;
-  }
-
-  div.content_section_text a:link,
-  div.content_section_text a:visited,
-   div.content_section_text a:active {
-    background-color: #DCDFE6;
-
-    color: #000000;
-  }
-
-  div.content_section_text a:hover {
-    background-color: #000000;
-
-    color: #DCDFE6;
-  }
-
-  div.validator {
-  }
-    </style>
-  </head>
-  <body>
-    <div class="main_page">
-      <div class="page_header floating_element">
-        <img src="/icons/openlogo-75.png" alt="Debian Logo" class="floating_element"/>
-        <span class="floating_element">
-          Apache2 Debian Default Page
-        </span>
-      </div>
-<!--      <div class="table_of_contents floating_element">
-        <div class="section_header section_header_grey">
-          TABLE OF CONTENTS
-        </div>
-        <div class="table_of_contents_item floating_element">
-          <a href="#about">About</a>
-        </div>
-        <div class="table_of_contents_item floating_element">
-          <a href="#changes">Changes</a>
-        </div>
-        <div class="table_of_contents_item floating_element">
-          <a href="#scope">Scope</a>
-        </div>
-        <div class="table_of_contents_item floating_element">
-          <a href="#files">Config files</a>
-        </div>
-      </div>
--->
-      <div class="content_section floating_element">
-
-
-        <div class="section_header section_header_red">
-          <div id="about"></div>
-          It works!
-        </div>
-        <div class="content_section_text">
-          <p>
-                This is the default welcome page used to test the correct 
-                operation of the Apache2 server after installation on Debian systems.
-                If you can read this page, it means that the Apache HTTP server installed at
-                this site is working properly. You should <b>replace this file</b> (located at
-                <tt>/var/www/html/index.html</tt>) before continuing to operate your HTTP server.
-          </p>
-
-
-          <p>
-                If you are a normal user of this web site and don't know what this page is
-                about, this probably means that the site is currently unavailable due to
-                maintenance.
-                If the problem persists, please contact the site's administrator.
-          </p>
-
-        </div>
-        <div class="section_header">
-          <div id="changes"></div>
-                Configuration Overview
-        </div>
-        <div class="content_section_text">
-          <p>
-                Debian's Apache2 default configuration is different from the
-                upstream default configuration, and split into several files optimized for
-                interaction with Debian tools. The configuration system is
-                <b>fully documented in
-                /usr/share/doc/apache2/README.Debian.gz</b>. Refer to this for the full
-                documentation. Documentation for the web server itself can be
-                found by accessing the <a href="/manual">manual</a> if the <tt>apache2-doc</tt>
-                package was installed on this server.
-
-          </p>
-          <p>
-                The configuration layout for an Apache2 web server installation on Debian systems is as follows:
-          </p>
-          <pre>
-/etc/apache2/
-|-- apache2.conf
-|       `--  ports.conf
-|-- mods-enabled
-|       |-- *.load
-|       `-- *.conf
-|-- conf-enabled
-|       `-- *.conf
-|-- sites-enabled
-|       `-- *.conf
-          </pre>
-          <ul>
-                        <li>
-                           <tt>apache2.conf</tt> is the main configuration
-                           file. It puts the pieces together by including all remaining configuration
-                           files when starting up the web server.
-                        </li>
-
-                        <li>
-                           <tt>ports.conf</tt> is always included from the
-                           main configuration file. It is used to determine the listening ports for
-                           incoming connections, and this file can be customized anytime.
-                        </li>
-
-                        <li>
-                           Configuration files in the <tt>mods-enabled/</tt>,
-                           <tt>conf-enabled/</tt> and <tt>sites-enabled/</tt> directories contain
-                           particular configuration snippets which manage modules, global configuration
-                           fragments, or virtual host configurations, respectively.
-                        </li>
-
-                        <li>
-                           They are activated by symlinking available
-                           configuration files from their respective
-                           *-available/ counterparts. These should be managed
-                           by using our helpers
-                           <tt>
-                                <a href="http://manpages.debian.org/cgi-bin/man.cgi?query=a2enmod">a2enmod</a>,
-                                <a href="http://manpages.debian.org/cgi-bin/man.cgi?query=a2dismod">a2dismod</a>,
-                           </tt>
-                           <tt>
-                                <a href="http://manpages.debian.org/cgi-bin/man.cgi?query=a2ensite">a2ensite</a>,
-                                <a href="http://manpages.debian.org/cgi-bin/man.cgi?query=a2dissite">a2dissite</a>,
-                            </tt>
-                                and
-                           <tt>
-                                <a href="http://manpages.debian.org/cgi-bin/man.cgi?query=a2enconf">a2enconf</a>,
-                                <a href="http://manpages.debian.org/cgi-bin/man.cgi?query=a2disconf">a2disconf</a>
-                           </tt>. See their respective man pages for detailed information.
-                        </li>
-
-                        <li>
-                           The binary is called apache2. Due to the use of
-                           environment variables, in the default configuration, apache2 needs to be
-                           started/stopped with <tt>/etc/init.d/apache2</tt> or <tt>apache2ctl</tt>.
-                           <b>Calling <tt>/usr/bin/apache2</tt> directly will not work</b> with the
-                           default configuration.
-                        </li>
-          </ul>
-        </div>
-
-        <div class="section_header">
-            <div id="docroot"></div>
-                Document Roots
-        </div>
-
-        <div class="content_section_text">
-            <p>
-                By default, Debian does not allow access through the web browser to
-                <em>any</em> file apart of those located in <tt>/var/www</tt>,
-                <a href="http://httpd.apache.org/docs/2.4/mod/mod_userdir.html">public_html</a>
-                directories (when enabled) and <tt>/usr/share</tt> (for web
-                applications). If your site is using a web document root
-                located elsewhere (such as in <tt>/srv</tt>) you may need to whitelist your
-                document root directory in <tt>/etc/apache2/apache2.conf</tt>.
-            </p>
-            <p>
-                The default Debian document root is <tt>/var/www/html</tt>. You
-                can make your own virtual hosts under /var/www. This is different
-                to previous releases which provides better security out of the box.
-            </p>
-        </div>
-
-        <div class="section_header">
-          <div id="bugs"></div>
-                Reporting Problems
-        </div>
-        <div class="content_section_text">
-          <p>
-                Please use the <tt>reportbug</tt> tool to report bugs in the
-                Apache2 package with Debian. However, check <a
-                href="http://bugs.debian.org/cgi-bin/pkgreport.cgi?ordering=normal;archive=0;src=apache2;repeatmerged=0">existing
-                bug reports</a> before reporting a new bug.
-          </p>
-          <p>
-                Please report bugs specific to modules (such as PHP and others)
-                to respective packages, not to the web server itself.
-          </p>
-        </div>
-
-
-
-
-      </div>
-    </div>
-    <div class="validator">
-    </div>
-  </body>
 </html>
-
